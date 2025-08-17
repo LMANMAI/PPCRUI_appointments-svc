@@ -10,6 +10,10 @@
     "start:dev": "nest start --watch",
     "start:dev:tcp": "cross-env MS_TRANSPORT=TCP nest start --watch",
     "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
