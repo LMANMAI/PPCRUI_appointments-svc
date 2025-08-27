@@ -16,11 +16,21 @@ enum AppointmentStatus {
   COMPLETED
 }
 
+enum SlotStatus {
+  FREE
+  BOOKED
+}
+
 model Appointment {
   id            String            @id @default(uuid())
   orgId         String
-  centerId      String
+  centerId      Int           
+
   patientUserId String
+  staffUserId   String?
+  slotId        String?  @unique
+  slot          Slot?    @relation(fields: [slotId], references: [id])
+
   status        AppointmentStatus @default(PENDING)
   startAt       DateTime
   endAt         DateTime
@@ -32,4 +42,22 @@ model Appointment {
 
   @@index([orgId, centerId, startAt])
   @@index([patientUserId, startAt])
+  @@index([staffUserId, startAt])
+}
+
+model Slot {
+  id           String     @id @default(uuid())
+  centerId     Int                         
+
+  staffUserId  String
+  startAt      DateTime
+  endAt        DateTime
+
+  status       SlotStatus @default(FREE)
+  reservedById String?
+
+  appointment  Appointment?
+
+  @@unique([staffUserId, startAt])
+  @@index([centerId, staffUserId, startAt])
 }
