@@ -2,10 +2,15 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
-  ForbiddenException,
 } from "@nestjs/common";
 import { RpcException } from "@nestjs/microservices";
 import { PrismaClient, Prisma } from "@prisma/client";
+import { ListSlotsDto, SlotSpecialty, CreateSlotDto } from "./dto/slots.dto";
+import {
+  CreateAppointmentDto,
+  ListAppointmentsDto,
+  AppointmentStatus as ApptStatusDto,
+} from "./dto/appointments.dto";
 
 function buildUtc(date: string, time: string): Date {
   const [y, m, d] = date.split("-").map(Number);
@@ -29,140 +34,129 @@ function mapPrismaError(e: any) {
   return rpc(500, "Error interno", { code: e?.code, msg: e?.message });
 }
 
+function mapApptStatusToSlotStatus(s?: ApptStatusDto): string[] | undefined {
+  if (!s) return undefined;
+  switch (s) {
+    case ApptStatusDto.PENDING:
+      return ["RESERVED"];
+    case ApptStatusDto.CONFIRMED:
+      return ["CONFIRMED"];
+    case ApptStatusDto.CANCELLED:
+      return ["CANCELLED"];
+    case ApptStatusDto.COMPLETED:
+      return ["COMPLETED"];
+    default:
+      return undefined;
+  }
+}
+
 @Injectable()
 export class AppointmentsService {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async create(dto: {
-    orgId: string;
-    slotId: string;
-    patientUserId: string;
-    notes?: string;
-  }) {
+  // Reserva un slot: FREE -> RESERVED y setea el paciente
+  async reserveSlot(dto: CreateAppointmentDto) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const taken = await tx.slot.updateMany({
         where: { id: dto.slotId, status: "FREE" as any },
-        data: { status: "BOOKED" as any, reservedById: dto.patientUserId },
-      });
-      if (taken.count === 0)
-        throw new BadRequestException(
-          "El turno ya fue tomado o no está disponible"
-        );
-
-      const slot = await tx.slot.findUnique({ where: { id: dto.slotId } });
-      if (!slot) throw new NotFoundException("Slot no encontrado");
-
-      return tx.appointment.create({
         data: {
-          orgId: dto.orgId,
-          centerId: slot.centerId,
+          status: "RESERVED" as any,
           patientUserId: dto.patientUserId,
-          staffUserId: slot.staffUserId,
-          slotId: slot.id,
-          startAt: slot.startAt,
-          endAt: slot.endAt,
-          status: "PENDING",
-          notes: dto.notes ?? null,
         },
       });
+      if (taken.count === 0) {
+        throw new BadRequestException(
+          "El slot no está disponible o ya fue tomado"
+        );
+      }
+      return tx.slot.findUnique({ where: { id: dto.slotId } });
     });
   }
 
-  async list(q: {
-    orgId: string;
-    centerId?: string;
-    patientUserId?: string;
-    staffUserId?: string;
-    status?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  }) {
-    const where: any = { orgId: q.orgId };
+  async listAppointmentsView(q: ListAppointmentsDto) {
+    const where: any = {
+      status: { in: ["RESERVED", "CONFIRMED", "CANCELLED", "COMPLETED"] },
+    };
+
     if (q.centerId) where.centerId = Number(q.centerId);
     if (q.patientUserId) where.patientUserId = q.patientUserId;
     if (q.staffUserId) where.staffUserId = q.staffUserId;
-    if (q.status) where.status = q.status;
+
+    const mapped = mapApptStatusToSlotStatus(q.status);
+    if (mapped) where.status = { in: mapped };
+
     if (q.dateFrom || q.dateTo) {
       where.startAt = {};
       if (q.dateFrom) where.startAt.gte = new Date(q.dateFrom);
       if (q.dateTo) where.startAt.lte = new Date(q.dateTo);
     }
-    return this.prisma.appointment.findMany({
+
+    return this.prisma.slot.findMany({
       where,
       orderBy: { startAt: "asc" },
-      include: { slot: true },
     });
   }
 
-  async getById(id: string, orgId: string) {
-    const ap = await this.prisma.appointment.findFirst({
-      where: { id, orgId },
-      include: { slot: true },
-    });
-    if (!ap) throw new NotFoundException("Turno no encontrado");
-    return ap;
+  async getAppointmentViewById(id: string, _orgId: string) {
+    const s = await this.prisma.slot.findUnique({ where: { id } });
+    if (!s) throw new NotFoundException("Slot no encontrado");
+    return s;
   }
 
-  async confirm(id: string, orgId: string) {
-    const ap = await this.getById(id, orgId);
-    if (ap.status === "CANCELLED")
-      throw new ForbiddenException("La cita está cancelada");
-    return this.prisma.appointment.update({
+  async confirmSlot(id: string, _orgId: string) {
+    const s = await this.prisma.slot.findUnique({ where: { id } });
+    if (!s) throw new NotFoundException("Slot no encontrado");
+    if (!s.patientUserId)
+      throw new BadRequestException("El slot no está reservado");
+    if (s.status === "CANCELLED")
+      throw new BadRequestException("El slot está cancelado");
+
+    return this.prisma.slot.update({
       where: { id },
-      data: { status: "CONFIRMED" },
+      data: { status: "CONFIRMED" as any },
     });
   }
 
-  async cancel(id: string, orgId: string, reason?: string) {
+  // Cancelar/ liberar slot
+  async cancelSlot(id: string, _orgId: string, reason?: string) {
+    const s = await this.prisma.slot.findUnique({ where: { id } });
+    if (!s) throw new NotFoundException("Slot no encontrado");
+
     const now = new Date();
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const ap = await tx.appointment.update({
+    if (s.startAt > now) {
+      return this.prisma.slot.update({
         where: { id },
         data: {
-          status: "CANCELLED",
+          status: "FREE" as any,
+          patientUserId: null,
+          notes: null,
           cancelReason: reason ?? null,
           cancelledAt: now,
         },
-        include: { slot: true },
       });
-      if (ap.orgId !== orgId)
-        throw new ForbiddenException("No pertenece a la organización");
-
-      if (ap.slot && ap.slot.startAt > now) {
-        await tx.slot.update({
-          where: { id: ap.slotId! },
-          data: { status: "FREE", reservedById: null },
-        });
-      }
-      return ap;
+    }
+    // histórico si ya pasó
+    return this.prisma.slot.update({
+      where: { id },
+      data: {
+        status: "CANCELLED" as any,
+        cancelReason: reason ?? null,
+        cancelledAt: now,
+      },
     });
   }
 
-  async createSlot(dto: {
-    centerId: number;
-    staffUserId: string;
-
-    // modo single
-    startAt?: string;
-    endAt?: string;
-
-    // modo bulk
-    startDate?: string;
-    workStartTime?: string;
-    workEndTime?: string;
-    slotDurationMin?: number;
-    days?: number;
-  }) {
+  // SLOTS
+  async createSlot(dto: CreateSlotDto) {
     const isSingle = !!(dto.startAt && dto.endAt);
 
     if (isSingle) {
-      // ----- SINGLE -----
       const start = new Date(dto.startAt!);
       const end = new Date(dto.endAt!);
       if (!(start < end))
         throw new BadRequestException("endAt debe ser posterior a startAt");
 
-      // bloquear superposiciones para el mismo operador (cualquier centro)
+      // evitar superposición para el mismo operador
       const overlap = await this.prisma.slot.findFirst({
         where: {
           staffUserId: dto.staffUserId,
@@ -183,6 +177,7 @@ export class AppointmentsService {
             startAt: start,
             endAt: end,
             status: "FREE" as any,
+            specialty: dto.specialty ?? null,
           },
         });
       } catch (e: any) {
@@ -190,7 +185,7 @@ export class AppointmentsService {
         throw mapPrismaError(e);
       }
     } else {
-      // ----- BULK/AGENDA -----
+      // agenda / bulk
       const { startDate, workStartTime, workEndTime, slotDurationMin, days } =
         dto;
       if (
@@ -239,6 +234,7 @@ export class AppointmentsService {
         startAt: Date;
         endAt: Date;
         status: any;
+        specialty?: SlotSpecialty | null;
       }> = [];
       for (let i = 0; i < days; i++) {
         const startDay = new Date(+dayStart0 + i * 24 * 60 * 60 * 1000);
@@ -250,26 +246,20 @@ export class AppointmentsService {
             startAt: new Date(t),
             endAt: new Date(t + durMs),
             status: "FREE" as any,
+            specialty: dto.specialty ?? null,
           });
         }
       }
 
-      const createdCount = await (async () => {
-        try {
-          return await this.prisma.$transaction(
-            async (tx: Prisma.TransactionClient) => {
-              const res = await tx.slot.createMany({
-                data: toCreate,
-                skipDuplicates: true,
-              });
-              return res.count;
-            }
-          );
-        } catch (e: any) {
-          console.error("[slots.create.bulk] error:", e);
-          throw mapPrismaError(e);
+      const createdCount = await this.prisma.$transaction(
+        async (tx: Prisma.TransactionClient) => {
+          const res = await tx.slot.createMany({
+            data: toCreate,
+            skipDuplicates: true,
+          });
+          return res.count;
         }
-      })();
+      );
 
       return {
         mode: "BULK",
@@ -277,26 +267,23 @@ export class AppointmentsService {
         created: createdCount,
         perDay: Math.floor((+dayEnd0 - +dayStart0) / durMs),
         days,
+        specialty: (dto as any).specialty ?? null,
       };
     }
   }
 
-  async listSlots(q: {
-    centerId?: string;
-    staffUserId?: string;
-    status?: "FREE" | "BOOKED";
-    dateFrom?: string;
-    dateTo?: string;
-  }) {
+  async listSlots(q: ListSlotsDto) {
     const where: any = {};
     if (q.centerId) where.centerId = Number(q.centerId);
     if (q.staffUserId) where.staffUserId = q.staffUserId;
     if (q.status) where.status = q.status;
+
     if (q.dateFrom || q.dateTo) {
       where.startAt = {};
       if (q.dateFrom) where.startAt.gte = new Date(q.dateFrom);
       if (q.dateTo) where.startAt.lte = new Date(q.dateTo);
     }
+    if (q.specialty) where.specialty = q.specialty as SlotSpecialty;
     return this.prisma.slot.findMany({ where, orderBy: { startAt: "asc" } });
   }
 

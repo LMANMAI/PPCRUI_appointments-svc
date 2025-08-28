@@ -8,56 +8,54 @@ datasource db {
   url               = env("DATABASE_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
-
-enum AppointmentStatus {
-  PENDING
-  CONFIRMED
-  CANCELLED
-  COMPLETED
-}
-
 enum SlotStatus {
-  FREE
-  BOOKED
+  FREE        // disponible
+  RESERVED    // tomado por paciente
+  CONFIRMED   // confirmado
+  CANCELLED   // cancelado
+  COMPLETED   // atendido
 }
 
-model Appointment {
-  id            String            @id @default(uuid())
-  orgId         String
-  centerId      Int           
-
-  patientUserId String
-  staffUserId   String?
-  slotId        String?  @unique
-  slot          Slot?    @relation(fields: [slotId], references: [id])
-
-  status        AppointmentStatus @default(PENDING)
-  startAt       DateTime
-  endAt         DateTime
-  notes         String?
-  cancelReason  String?
-  cancelledAt   DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-
-  @@index([orgId, centerId, startAt])
-  @@index([patientUserId, startAt])
-  @@index([staffUserId, startAt])
+enum SlotSpecialty {
+  CLINICA_MEDICA
+  CARDIOLOGIA
+  PEDIATRIA
+  GINECOLOGIA
+  OBSTETRICIA
+  TRAUMATOLOGIA
+  DERMATOLOGIA
+  NEUROLOGIA
+  PSICOLOGIA
+  PSIQUIATRIA
+  ODONTOLOGIA
+  KINESIOLOGIA
+  NUTRICION
+  FONOAUDIOLOGIA
+  OFTALMOLOGIA
+  OTORRINOLARINGOLOGIA
+  UROLOGIA
 }
 
 model Slot {
   id           String     @id @default(uuid())
-  centerId     Int                         
+  centerId     Int
+  staffUserId  String        // operador/asignado
+  patientUserId String?      // paciente
 
-  staffUserId  String
   startAt      DateTime
   endAt        DateTime
-
+  specialty    SlotSpecialty?  
   status       SlotStatus @default(FREE)
-  reservedById String?
-
-  appointment  Appointment?
+  
+  notes         String?
+  cancelReason  String?
+  cancelledAt   DateTime?
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@unique([staffUserId, startAt])
-  @@index([centerId, staffUserId, startAt])
+  @@index([centerId, startAt])
+  @@index([patientUserId, startAt])
+  @@index([staffUserId, startAt])
 }

@@ -16,6 +16,27 @@ export enum SlotStatusDto {
   FREE = "FREE",
   BOOKED = "BOOKED",
 }
+
+export enum SlotSpecialty {
+  CLINICA_MEDICA = "CLINICA_MEDICA",
+  CARDIOLOGIA = "CARDIOLOGIA",
+  PEDIATRIA = "PEDIATRIA",
+  GINECOLOGIA = "GINECOLOGIA",
+  OBSTETRICIA = "OBSTETRICIA",
+  TRAUMATOLOGIA = "TRAUMATOLOGIA",
+  DERMATOLOGIA = "DERMATOLOGIA",
+  NEUROLOGIA = "NEUROLOGIA",
+  PSICOLOGIA = "PSICOLOGIA",
+  PSIQUIATRIA = "PSIQUIATRIA",
+  ODONTOLOGIA = "ODONTOLOGIA",
+  KINESIOLOGIA = "KINESIOLOGIA",
+  NUTRICION = "NUTRICION",
+  FONOAUDIOLOGIA = "FONOAUDIOLOGIA",
+  OFTALMOLOGIA = "OFTALMOLOGIA",
+  OTORRINOLARINGOLOGIA = "OTORRINOLARINGOLOGIA",
+  UROLOGIA = "UROLOGIA",
+}
+
 export class CreateSlotDto {
   @ApiProperty()
   @Type(() => Number)
@@ -43,7 +64,7 @@ export class CreateSlotDto {
   @IsISO8601()
   endAt?: string;
 
-  // --- MODO BULK/AGENDA ---
+  // modo agenda
   @ApiPropertyOptional({ example: "2025-09-01" })
   @ValidateIf((o) => !o.startAt && !o.endAt)
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: "startDate debe ser YYYY-MM-DD" })
@@ -72,13 +93,18 @@ export class CreateSlotDto {
   @IsInt()
   @Min(1)
   days?: number;
+
+  @ApiPropertyOptional({ enum: SlotSpecialty })
+  @IsOptional()
+  @IsEnum(SlotSpecialty)
+  specialty?: SlotSpecialty;
 }
 
 export class ListSlotsDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  centerId?: string; // llega como string; se castea adentro
+  centerId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -99,4 +125,6 @@ export class ListSlotsDto {
   @IsOptional()
   @IsISO8601()
   dateTo?: string;
+
+  @IsOptional() @IsEnum(SlotSpecialty) specialty?: SlotSpecialty;
 }

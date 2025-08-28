@@ -1,5 +1,5 @@
 import { Controller } from "@nestjs/common";
-import { MessagePattern, Payload } from "@nestjs/microservices";
+import { MessagePattern, Payload, RpcException } from "@nestjs/microservices";
 import { APPOINTMENTS } from "./patterns";
 import { AppointmentsService } from "./appointments.service";
 import {
@@ -10,59 +10,108 @@ import {
 } from "./dto/appointments.dto";
 import { CreateSlotDto, ListSlotsDto } from "./dto/slots.dto";
 
+function toRpc(e: any): RpcException {
+  if (e instanceof RpcException) return e;
+  const status = Number.isInteger(e?.statusCode)
+    ? e.statusCode
+    : Number.isInteger(e?.status)
+    ? e.status
+    : 500;
+  const message = typeof e?.message === "string" ? e.message : "Internal error";
+  return new RpcException({ statusCode: status, message });
+}
+
 @Controller()
 export class AppointmentsController {
   constructor(private readonly svc: AppointmentsService) {}
 
   @MessagePattern(APPOINTMENTS.Create)
-  create(@Payload() dto: CreateAppointmentDto) {
-    return this.svc.create(dto);
+  async create(@Payload() dto: CreateAppointmentDto) {
+    try {
+      // Reservar un slot
+      return await this.svc.reserveSlot(dto);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.List)
-  list(@Payload() q: ListAppointmentsDto) {
-    return this.svc.list(q);
+  async list(@Payload() q: ListAppointmentsDto) {
+    try {
+      // Listar "turnos" = slots con status tomado
+      return await this.svc.listAppointmentsView(q);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.GetById)
-  getById(@Payload() p: { id: string; orgId: string }) {
-    return this.svc.getById(p.id, p.orgId);
+  async getById(@Payload() p: { id: string; orgId: string }) {
+    try {
+      // Obtener el slot
+      return await this.svc.getAppointmentViewById(p.id, p.orgId);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.Cancel)
-  cancel(@Payload() dto: CancelAppointmentDto) {
-    return this.svc.cancel(dto.id, dto.orgId, dto.reason);
+  async cancel(@Payload() dto: CancelAppointmentDto) {
+    try {
+      // Cancelar/ liberar slot
+      return await this.svc.cancelSlot(dto.id, dto.id, dto.reason);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.Confirm)
-  confirm(@Payload() dto: ConfirmAppointmentDto) {
-    return this.svc.confirm(dto.id, dto.orgId);
+  async confirm(@Payload() dto: ConfirmAppointmentDto) {
+    try {
+      // Confirmar slot
+      return await this.svc.confirmSlot(dto.id, dto.id);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.Slots_Create)
-  createSlot(@Payload() dto: CreateSlotDto) {
-    return this.svc.createSlot({
-      centerId: Number(dto.centerId),
-      staffUserId: dto.staffUserId,
-      startAt: dto.startAt,
-      endAt: dto.endAt,
-      startDate: dto.startDate,
-      workStartTime: dto.workStartTime,
-      workEndTime: dto.workEndTime,
-      slotDurationMin: dto.slotDurationMin
-        ? Number(dto.slotDurationMin)
-        : undefined,
-      days: dto.days ? Number(dto.days) : undefined,
-    });
+  async createSlot(@Payload() dto: CreateSlotDto) {
+    try {
+      return await this.svc.createSlot({
+        centerId: Number(dto.centerId),
+        staffUserId: dto.staffUserId,
+        startAt: dto.startAt,
+        endAt: dto.endAt,
+        startDate: dto.startDate,
+        workStartTime: dto.workStartTime,
+        workEndTime: dto.workEndTime,
+        slotDurationMin: dto.slotDurationMin
+          ? Number(dto.slotDurationMin)
+          : undefined,
+        days: dto.days ? Number(dto.days) : undefined,
+        specialty: dto.specialty,
+      });
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.Slots_List)
-  listSlots(@Payload() q: ListSlotsDto) {
-    return this.svc.listSlots(q);
+  async listSlots(@Payload() q: ListSlotsDto) {
+    try {
+      return await this.svc.listSlots(q);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 
   @MessagePattern(APPOINTMENTS.Slots_GetById)
-  getSlotById(@Payload() p: { id: string }) {
-    return this.svc.getSlotById(p.id);
+  async getSlotById(@Payload() p: { id: string }) {
+    try {
+      return await this.svc.getSlotById(p.id);
+    } catch (error) {
+      throw toRpc(error);
+    }
   }
 }
